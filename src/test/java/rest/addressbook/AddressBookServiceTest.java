@@ -40,6 +40,14 @@ public class AddressBookServiceTest {
 		Response response = client.target("http://localhost:8282/contacts")
 				.request().get();
 		assertEquals(200, response.getStatus());
+
+		//We can verify that GET method is secure because we only obtain information
+		//and we don't modify anything of the server, also is idempotent because we can do
+		//the same GET all times we want, and we will always obtain the same result
+		response = client.target("http://localhost:8282/contacts")
+				.request().get();
+		assertEquals(200, response.getStatus());
+
 		assertEquals(0, response.readEntity(AddressBook.class).getPersonList()
 				.size());
 
@@ -62,6 +70,7 @@ public class AddressBookServiceTest {
 
 		// Create a new user
 		Client client = ClientBuilder.newClient();
+
 		Response response = client.target("http://localhost:8282/contacts")
 				.request(MediaType.APPLICATION_JSON)
 				.post(Entity.entity(juan, MediaType.APPLICATION_JSON));
@@ -87,8 +96,17 @@ public class AddressBookServiceTest {
 		//////////////////////////////////////////////////////////////////////
 		// Verify that POST /contacts is well implemented by the service, i.e
 		// test that it is not safe and not idempotent
-		//////////////////////////////////////////////////////////////////////	
-				
+		//////////////////////////////////////////////////////////////////////
+
+		//We can test that POST is not secure because we modify the server (adding a person) and
+		//also is not idempotent because each time we do a POST we can see that is created in another
+		//register
+		URI juanURI2 = URI.create("http://localhost:8282/contacts/person/2");
+		Response resp = client.target("http://localhost:8282/contacts")
+				.request(MediaType.APPLICATION_JSON)
+				.post(Entity.entity(juan, MediaType.APPLICATION_JSON));
+		assertEquals(juanURI2, resp.getLocation());
+
 	}
 
 	@Test
@@ -134,15 +152,28 @@ public class AddressBookServiceTest {
 				.request(MediaType.APPLICATION_JSON).get();
 		assertEquals(200, response.getStatus());
 		assertEquals(MediaType.APPLICATION_JSON_TYPE, response.getMediaType());
+
+
+		//////////////////////////////////////////////////////////////////////
+		// Verify that GET /contacts/person/3 is well implemented by the service, i.e
+		// test that it is safe and idempotent
+		//////////////////////////////////////////////////////////////////////
+
+		//We can verify that GET method is secure because we only obtain information
+		//and we don't modify anything of the server, also is idempotent because we can do
+		//the same GET all times we want, and we will always obtain the same result.
+		//In this case, the first response (when we do GET) is identically the same that the first one
+		response = client.target("http://localhost:8282/contacts/person/3")
+				.request(MediaType.APPLICATION_JSON).get();
+		assertEquals(200, response.getStatus());
+		assertEquals(MediaType.APPLICATION_JSON_TYPE, response.getMediaType());
+
 		mariaUpdated = response.readEntity(Person.class);
 		assertEquals(maria.getName(), mariaUpdated.getName());
 		assertEquals(3, mariaUpdated.getId());
 		assertEquals(mariaURI, mariaUpdated.getHref());
 
-		//////////////////////////////////////////////////////////////////////
-		// Verify that GET /contacts/person/3 is well implemented by the service, i.e
-		// test that it is safe and idempotent
-		//////////////////////////////////////////////////////////////////////	
+
 	
 	}
 
@@ -174,7 +205,31 @@ public class AddressBookServiceTest {
 		//////////////////////////////////////////////////////////////////////
 		// Verify that POST is well implemented by the service, i.e
 		// test that it is not safe and not idempotent
-		//////////////////////////////////////////////////////////////////////	
+		//////////////////////////////////////////////////////////////////////
+		//We can test that POST is not secure because we modify the server (adding a person) and
+		//also is not idempotent because each time we do a POST we can see that is created in another
+		//register. In this case I compare the name of pepito, first in the register 2, and after do
+		//the second test, in the register 3.
+
+
+		Person pepito = new Person();
+		pepito.setName("Pepito");
+		URI pepitoURI = URI.create("http://localhost:8282/contacts/person/1");
+
+		client.target("http://localhost:8282/contacts")
+				.request(MediaType.APPLICATION_JSON)
+				.post(Entity.entity(pepito, MediaType.APPLICATION_JSON));
+
+		assertEquals(pepito.getName(), ab.getPersonList()
+				.get(2).getName());
+
+
+		client.target("http://localhost:8282/contacts")
+				.request(MediaType.APPLICATION_JSON)
+				.post(Entity.entity(pepito, MediaType.APPLICATION_JSON));
+
+		assertEquals(pepito.getName(), ab.getPersonList()
+				.get(3).getName());
 	
 	}
 
@@ -208,6 +263,24 @@ public class AddressBookServiceTest {
 		assertEquals(2, juanUpdated.getId());
 		assertEquals(juanURI, juanUpdated.getHref());
 
+		//////////////////////////////////////////////////////////////////////
+		// Verify that PUT /contacts/person/2 is well implemented by the service, i.e
+		// test that it is idempotent
+		//////////////////////////////////////////////////////////////////////
+
+		//We can check that PUT is not secure because we modified the server (when we add a person),
+		//but it is idempotent, because we can check that each time we do a put and the resource is already created
+		//(the person exist), this method doesn't create another person in the server
+		response = client
+				.target("http://localhost:8282/contacts/person/2")
+				.request(MediaType.APPLICATION_JSON)
+				.put(Entity.entity(maria, MediaType.APPLICATION_JSON));
+		assertEquals(MediaType.APPLICATION_JSON_TYPE, response.getMediaType());
+		juanUpdated = response.readEntity(Person.class);
+		assertEquals(maria.getName(), juanUpdated.getName());
+		assertEquals(2, juanUpdated.getId());
+		assertEquals(juanURI, juanUpdated.getHref());
+
 		// Verify that the update is real
 		response = client.target("http://localhost:8282/contacts/person/2")
 				.request(MediaType.APPLICATION_JSON).get();
@@ -224,10 +297,7 @@ public class AddressBookServiceTest {
 				.put(Entity.entity(maria, MediaType.APPLICATION_JSON));
 		assertEquals(400, response.getStatus());
 
-		//////////////////////////////////////////////////////////////////////
-		// Verify that PUT /contacts/person/2 is well implemented by the service, i.e
-		// test that it is idempotent
-		//////////////////////////////////////////////////////////////////////	
+
 	
 	}
 
@@ -257,11 +327,23 @@ public class AddressBookServiceTest {
 				.request().delete();
 		assertEquals(404, response.getStatus());
 
+
 		//////////////////////////////////////////////////////////////////////
 		// Verify that DELETE /contacts/person/2 is well implemented by the service, i.e
 		// test that it is idempotent
-		//////////////////////////////////////////////////////////////////////	
+		//////////////////////////////////////////////////////////////////////
 
+		//We can check that DELETE is not secure because we modified the server (we delete the resource),
+		// but it is idempotent because each time we execute DELETE the result is the same, the service without
+		//the recurse. In this case we can check that the first time we delete the person Juan,
+		//and we receive the code 204 which indicates that the server has successfully fulfilled the request and
+		//the second time, if we execute the same, we received the code 404 (Not Found) which it means that the
+		//resource is not available so DELETE is idempotent
+
+		// Verify that the user has been deleted
+		response = client.target("http://localhost:8282/contacts/person/2")
+				.request().delete();
+		assertEquals(404, response.getStatus());
 	}
 
 	@Test
